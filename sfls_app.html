@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SFLS — Smart Faculty Locator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"
+    />
+    <script
+      src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"
+      defer
+    ></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- ── Top Nav ── -->
+    <nav class="nav">
+      <div class="nav-logo">
+        <div class="nav-logo-dot"></div>
+        <span>S</span>FLS
+        <span
+          style="
+            color: var(--text3);
+            font-weight: 400;
+            font-size: 0.9rem;
+            margin-left: 4px;
+          "
+          >Campus</span
+        >
+      </div>
+      <div class="nav-actions">
+        <button
+          class="nav-notif-btn"
+          onclick="toggleNotifPanel()"
+          id="notifBtn"
+        >
+          🔔 <span class="notif-badge" id="notifBadge">0</span>
+        </button>
+        <div id="authButtons">
+          <button class="btn-login" onclick="openAuthModal()">Sign In</button>
+        </div>
+        <div id="userMenu" class="nav-user hidden">
+          <div class="nav-avatar" id="navAvatar">U</div>
+          <span id="navName"></span>
+          <button
+            class="btn-sm"
+            onclick="logout()"
+            style="margin-left: 4px; padding: 5px 12px; flex: none"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ══════════════════════════════════════
+     PAGE: STUDENT VIEW
+══════════════════════════════════════ -->
+    <div id="page-student" class="page active">
+      <!-- Hero + Search -->
+      <section class="hero">
+        <div class="hero-tag">🎓 Smart Faculty Locator System</div>
+        <h1>Find Any Faculty<br /><em>Instantly</em></h1>
+        <p>
+          Real-time availability, room locations, and turn-by-turn navigation —
+          all in one place.
+        </p>
+        <div class="search-wrap">
+          <div class="search-bar">
+            <input
+              type="text"
+              id="searchInput"
+              placeholder="Search by name, department…"
+              oninput="debounceSearch()"
+            />
+            <select id="deptFilter" onchange="doSearch()">
+              <option value="">All Departments</option>
+              <option value="CSE">CSE</option>
+              <option value="ECE">ECE</option>
+              <option value="MECH">MECH</option>
+              <option value="MATH">MATH</option>
+            </select>
+            <button class="btn-search" onclick="doSearch()">🔍 Search</button>
+          </div>
+        </div>
+        <div class="filter-chips">
+          <div
+            class="chip active"
+            data-status=""
+            onclick="filterByStatus(this, '')"
+          >
+            All
+          </div>
+          <div
+            class="chip"
+            data-status="available"
+            onclick="filterByStatus(this, 'available')"
+          >
+            <span class="chip-dot"></span> Available
+          </div>
+          <div
+            class="chip"
+            data-status="busy"
+            onclick="filterByStatus(this, 'busy')"
+          >
+            <span class="chip-dot"></span> Busy
+          </div>
+          <div
+            class="chip"
+            data-status="not_available"
+            onclick="filterByStatus(this, 'not_available')"
+          >
+            <span class="chip-dot"></span> Not Available
+          </div>
+          <div
+            class="chip"
+            data-status="in_class"
+            onclick="filterByStatus(this, 'in_class')"
+          >
+            <span class="chip-dot"></span> In Class
+          </div>
+        </div>
+      </section>
+
+      <!-- Faculty listing -->
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">Faculty Members</div>
+          <div class="count-badge" id="countBadge">— results</div>
+        </div>
+        <div class="faculty-grid" id="facultyGrid">
+          <!-- Populated by JS -->
+        </div>
+        <div
+          id="noResults"
+          class="hidden"
+          style="text-align: center; padding: 60px 20px; color: var(--text2)"
+        >
+          <div style="font-size: 2.5rem; margin-bottom: 12px">🔍</div>
+          <div style="font-size: 1.1rem; font-weight: 600; color: var(--text)">
+            No faculty found
+          </div>
+          <div style="font-size: 0.9rem; margin-top: 6px">
+            Try a different name or department
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     PAGE: FACULTY DASHBOARD
+══════════════════════════════════════ -->
+    <div id="page-faculty" class="page">
+      <div class="faculty-panel">
+        <div class="fp-header">
+          <div style="font-size: 2rem">🎓</div>
+          <div>
+            <div class="fp-title" id="fpName">Faculty Dashboard</div>
+            <div class="fp-subtitle" id="fpDesig">
+              Update your status for students
+            </div>
+          </div>
+          <div class="fp-badge" id="fpCurrentStatus">Loading…</div>
+        </div>
+
+        <h3
+          style="
+            font-size: 0.9rem;
+            color: var(--text2);
+            font-weight: 600;
+            margin-bottom: 12px;
+            font-family: var(--font-head);
+          "
+        >
+          SET YOUR STATUS
+        </h3>
+        <div class="status-grid">
+          <div
+            class="status-card available"
+            data-s="available"
+            onclick="selectStatus(this)"
+          >
+            <span class="status-icon">✅</span>
+            <div>
+              <div class="status-label">Available</div>
+              <div class="status-desc">Students can meet you</div>
+            </div>
+            <div class="status-radio"></div>
+          </div>
+          <div
+            class="status-card busy"
+            data-s="busy"
+            onclick="selectStatus(this)"
+          >
+            <span class="status-icon">⏳</span>
+            <div>
+              <div class="status-label">Busy</div>
+              <div class="status-desc">Occupied, try later</div>
+            </div>
+            <div class="status-radio"></div>
+          </div>
+          <div
+            class="status-card not_available"
+            data-s="not_available"
+            onclick="selectStatus(this)"
+          >
+            <span class="status-icon">🚫</span>
+            <div>
+              <div class="status-label">Not Available</div>
+              <div class="status-desc">Away from cabin</div>
+            </div>
+            <div class="status-radio"></div>
+          </div>
+          <div
+            class="status-card in_class"
+            data-s="in_class"
+            onclick="selectStatus(this)"
+          >
+            <span class="status-icon">📚</span>
+            <div>
+              <div class="status-label">In Class</div>
+              <div class="status-desc">Teaching session active</div>
+            </div>
+            <div class="status-radio"></div>
+          </div>
+        </div>
+
+        <div class="msg-input-wrap">
+          <label
+            >Custom Message
+            <span style="color: var(--text3)">(optional)</span></label
+          >
+          <textarea
+            id="statusMsg"
+            maxlength="255"
+            placeholder="e.g. Available in the library after 2 PM…"
+            oninput="
+              document.getElementById('charCount').textContent =
+                this.value.length + '/255'
+            "
+          ></textarea>
+          <div class="char-count" id="charCount">0/255</div>
+        </div>
+
+        <button
+          class="btn-full"
+          onclick="saveStatus()"
+          style="margin-bottom: 20px"
+        >
+          Update Status →
+        </button>
+
+        <!-- WiFi / Geofence card -->
+        <div class="wifi-card">
+          <span class="wifi-icon">📡</span>
+          <div class="wifi-info">
+            <div class="wifi-label">Auto-Status (WiFi / GPS)</div>
+            <div class="wifi-sub" id="wifiSub">
+              Monitoring campus presence — status auto-updates when you leave.
+            </div>
+          </div>
+          <span class="wifi-status off" id="wifiStatusBadge">Off Campus</span>
+        </div>
+        <button
+          class="btn-sm"
+          onclick="doCheckin()"
+          style="width: 100%; padding: 10px; font-size: 0.88rem"
+        >
+          📍 Manual Check-In (Update Location)
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     PAGE: ADMIN DASHBOARD
+══════════════════════════════════════ -->
+    <div id="page-admin" class="page">
+      <div class="faculty-panel">
+        <div class="fp-header">
+          <div style="font-size: 2rem">⚙️</div>
+          <div>
+            <div class="fp-title">Admin Panel</div>
+            <div class="fp-subtitle">
+              Manage buildings, rooms, and seat allocations
+            </div>
+          </div>
+          <div class="fp-badge">Admin</div>
+        </div>
+
+        <div class="admin-tabs-row">
+          <button
+            class="admin-tab active"
+            onclick="adminTab(this, 'tab-buildings')"
+          >
+            🏢 Buildings
+          </button>
+          <button class="admin-tab" onclick="adminTab(this, 'tab-floors')">
+            🏗️ Floors
+          </button>
+          <button class="admin-tab" onclick="adminTab(this, 'tab-rooms')">
+            🚪 Rooms
+          </button>
+          <button class="admin-tab" onclick="adminTab(this, 'tab-seats')">
+            💺 Seating
+          </button>
+          <button class="admin-tab" onclick="adminTab(this, 'tab-faculty')">
+            👤 Faculty
+          </button>
+        </div>
+
+        <!-- Buildings -->
+        <div id="tab-buildings" class="admin-tab-panel">
+          <h3
+            style="
+              font-size: 0.9rem;
+              color: var(--text2);
+              font-weight: 600;
+              margin-bottom: 14px;
+              font-family: var(--font-head);
+            "
+          >
+            ADD / MANAGE BUILDINGS
+          </h3>
+          <div class="admin-form-grid">
+            <div class="form-row">
+              <label>Building Name</label>
+              <input
+                type="text"
+                id="bldgName"
+                class="form-control"
+                placeholder="CSE Block"
+              />
+            </div>
+            <div class="form-row">
+              <label>Short Code</label>
+              <input
+                type="text"
+                id="bldgCode"
+                class="form-control"
+                placeholder="CSE-BLK"
+              />
+            </div>
+            <div class="form-row">
+              <label>Latitude</label>
+              <input
+                type="number"
+                id="bldgLat"
+                class="form-control"
+                placeholder="28.6139"
+                step="0.0001"
+              />
+            </div>
+            <div class="form-row">
+              <label>Longitude</label>
+              <input
+                type="number"
+                id="bldgLng"
+                class="form-control"
+                placeholder="77.2090"
+                step="0.0001"
+              />
+            </div>
+            <div class="form-row">
+              <label>Entrance Lat</label>
+              <input
+                type="number"
+                id="bldgEntLat"
+                class="form-control"
+                placeholder="28.6140"
+                step="0.0001"
+              />
+            </div>
+            <div class="form-row">
+              <label>Entrance Lng</label>
+              <input
+                type="number"
+                id="bldgEntLng"
+                class="form-control"
+                placeholder="77.2091"
+                step="0.0001"
+              />
+            </div>
+          </div>
+          <button class="btn-full mt-16" onclick="addBuilding()">
+            ➕ Add Building
+          </button>
+          <div id="buildingsList" class="mt-16"></div>
+        </div>
+
+        <!-- Floors -->
+        <div id="tab-floors" class="admin-tab-panel hidden">
+          <h3
+            style="
+              font-size: 0.9rem;
+              color: var(--text2);
+              font-weight: 600;
+              margin-bottom: 14px;
+              font-family: var(--font-head);
+            "
+          >
+            ADD FLOORS
+          </h3>
+          <div class="admin-form-grid">
+            <div class="form-row">
+              <label>Building</label>
+              <select id="floorBldg" class="form-control">
+                <option value="">Select Building</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Floor Number</label>
+              <input
+                type="number"
+                id="floorNum"
+                class="form-control"
+                placeholder="0 = Ground"
+                min="0"
+              />
+            </div>
+            <div class="form-row">
+              <label>Floor Name</label>
+              <input
+                type="text"
+                id="floorName"
+                class="form-control"
+                placeholder="Ground Floor"
+              />
+            </div>
+          </div>
+          <button class="btn-full mt-16" onclick="addFloor()">
+            ➕ Add Floor
+          </button>
+        </div>
+
+        <!-- Rooms -->
+        <div id="tab-rooms" class="admin-tab-panel hidden">
+          <h3
+            style="
+              font-size: 0.9rem;
+              color: var(--text2);
+              font-weight: 600;
+              margin-bottom: 14px;
+              font-family: var(--font-head);
+            "
+          >
+            ADD ROOMS
+          </h3>
+          <div class="admin-form-grid">
+            <div class="form-row">
+              <label>Floor</label>
+              <select id="roomFloor" class="form-control">
+                <option value="">Select Floor</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Room Number</label>
+              <input
+                type="text"
+                id="roomNum"
+                class="form-control"
+                placeholder="201-A"
+              />
+            </div>
+            <div class="form-row">
+              <label>Room Name</label>
+              <input
+                type="text"
+                id="roomName"
+                class="form-control"
+                placeholder="Staff Room"
+              />
+            </div>
+            <div class="form-row">
+              <label>Type</label>
+              <select id="roomType" class="form-control">
+                <option value="office">Office</option>
+                <option value="cabin">Cabin</option>
+                <option value="lab">Lab</option>
+                <option value="classroom">Classroom</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>SVG X</label>
+              <input
+                type="number"
+                id="roomX"
+                class="form-control"
+                placeholder="50"
+              />
+            </div>
+            <div class="form-row">
+              <label>SVG Y</label>
+              <input
+                type="number"
+                id="roomY"
+                class="form-control"
+                placeholder="80"
+              />
+            </div>
+          </div>
+          <button class="btn-full mt-16" onclick="addRoom()">
+            ➕ Add Room
+          </button>
+        </div>
+
+        <!-- Seating Grid -->
+        <div id="tab-seats" class="admin-tab-panel hidden">
+          <h3
+            style="
+              font-size: 0.9rem;
+              color: var(--text2);
+              font-weight: 600;
+              margin-bottom: 14px;
+              font-family: var(--font-head);
+            "
+          >
+            VISUAL SEATING ALLOCATOR
+          </h3>
+          <div class="admin-form-grid" style="margin-bottom: 16px">
+            <div class="form-row">
+              <label>Room</label>
+              <select
+                id="seatRoom"
+                class="form-control"
+                onchange="loadSeatingGrid()"
+              >
+                <option value="">Select Room</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Faculty to Assign</label>
+              <select id="seatFaculty" class="form-control">
+                <option value="">Select Faculty</option>
+              </select>
+            </div>
+          </div>
+          <div
+            style="font-size: 0.8rem; color: var(--text2); margin-bottom: 12px"
+          >
+            💡 Click a seat to select → then click "Assign Faculty to Seat"
+          </div>
+          <div class="seating-grid-wrap">
+            <div
+              class="seating-grid"
+              id="seatingGrid"
+              style="grid-template-columns: repeat(5, 52px)"
+            >
+              <!-- generated by JS -->
+            </div>
+          </div>
+          <button class="btn-full mt-16" onclick="assignSeat()">
+            💺 Assign Faculty to Selected Seat
+          </button>
+        </div>
+
+        <!-- Faculty management -->
+        <div id="tab-faculty" class="admin-tab-panel hidden">
+          <h3
+            style="
+              font-size: 0.9rem;
+              color: var(--text2);
+              font-weight: 600;
+              margin-bottom: 14px;
+              font-family: var(--font-head);
+            "
+          >
+            MANAGE FACULTY STATUS (OVERRIDE)
+          </h3>
+          <div id="adminFacultyList" class="faculty-grid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     MODALS
+══════════════════════════════════════ -->
+
+    <!-- Auth Modal -->
+    <div
+      class="modal-overlay"
+      id="authOverlay"
+      onclick="closeIfBg(event, 'authOverlay')"
+    >
+      <div class="modal auth-modal">
+        <div class="modal-header">
+          <div class="modal-title" id="authTitle">Sign In</div>
+          <button class="modal-close" onclick="closeModal('authOverlay')">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="error-msg" id="authError"></div>
+          <div class="auth-form" id="loginForm">
+            <div class="form-group">
+              <label>Email</label>
+              <input
+                type="email"
+                id="loginEmail"
+                class="form-control"
+                placeholder="you@campus.edu"
+              />
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input
+                type="password"
+                id="loginPassword"
+                class="form-control"
+                placeholder="••••••••"
+              />
+            </div>
+            <button class="btn-full" onclick="doLogin()">Sign In →</button>
+            <div class="auth-switch">
+              Don't have an account?
+              <a href="#" onclick="showRegister()">Register</a>
+            </div>
+          </div>
+          <div class="auth-form hidden" id="registerForm">
+            <div class="form-group">
+              <label>Full Name</label>
+              <input
+                type="text"
+                id="regName"
+                class="form-control"
+                placeholder="Dr. Priya Sharma"
+              />
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input
+                type="email"
+                id="regEmail"
+                class="form-control"
+                placeholder="you@campus.edu"
+              />
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input
+                type="password"
+                id="regPassword"
+                class="form-control"
+                placeholder="••••••••"
+              />
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <select id="regRole" class="form-control">
+                <option value="student">Student</option>
+                <option value="faculty">Faculty</option>
+              </select>
+            </div>
+            <button class="btn-full" onclick="doRegister()">
+              Create Account →
+            </button>
+            <div class="auth-switch">
+              Already registered? <a href="#" onclick="showLogin()">Sign In</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Faculty Detail + Navigation Modal -->
+    <div
+      class="modal-overlay"
+      id="navOverlay"
+      onclick="closeIfBg(event, 'navOverlay')"
+    >
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title" id="navModalTitle">Faculty Details</div>
+          <button class="modal-close" onclick="closeModal('navOverlay')">
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="fd-top">
+            <div class="fd-avatar" id="navFacAvatar"></div>
+            <div class="fd-info">
+              <div class="fd-name" id="navFacName"></div>
+              <div class="fd-meta-row">
+                <span class="fd-tag" id="navFacDesig"></span>
+                <span class="fd-tag" id="navFacDept"></span>
+                <span class="fd-tag" id="navFacEmp"></span>
+              </div>
+            </div>
+          </div>
+          <div class="fd-msg-box" id="navFacMsg" style="display: none"></div>
+          <div id="navFacStatusRow" style="margin-bottom: 16px"></div>
+
+          <div class="nav-tabs">
+            <button
+              class="nav-tab active"
+              onclick="navTab(this, 'tab-outdoor')"
+            >
+              🗺 Outdoor Nav
+            </button>
+            <button class="nav-tab" onclick="navTab(this, 'tab-indoor')">
+              🏢 Indoor Nav
+            </button>
+            <button class="nav-tab" onclick="navTab(this, 'tab-info')">
+              ℹ Info
+            </button>
+          </div>
+
+          <!-- Outdoor tab -->
+          <div id="tab-outdoor" class="tab-panel active">
+            <div class="nav-meta" id="outdoorMeta"></div>
+            <div class="map-placeholder" id="mapPlaceholder">
+              <div id="google-map-container"></div>
+              <div id="mapFallback" style="text-align: center">
+                <div style="font-size: 2.5rem; margin-bottom: 8px">🗺️</div>
+                <div
+                  style="
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    color: var(--text);
+                  "
+                >
+                  Outdoor Navigation
+                </div>
+                <div style="font-size: 0.8rem; margin-top: 4px">
+                  Click "Get My Location" to start outdoor navigation
+                </div>
+                <button
+                  class="btn-sm primary mt-16"
+                  onclick="startOutdoorNav()"
+                  style="flex: none; padding: 8px 20px"
+                >
+                  📍 Get My Location
+                </button>
+              </div>
+            </div>
+            <div
+              id="gmaps-directions"
+              style="margin-top: 12px; font-size: 0.85rem; color: var(--text2)"
+            ></div>
+          </div>
+
+          <!-- Indoor tab -->
+          <div id="tab-indoor" class="tab-panel">
+            <div class="floor-map-wrap">
+              <svg
+                id="floor-svg"
+                viewBox="0 0 500 300"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <!-- SVG floor plan rendered here -->
+                <rect width="500" height="300" fill="#141922" rx="8" />
+                <text
+                  x="250"
+                  y="150"
+                  text-anchor="middle"
+                  fill="#4a5e7a"
+                  font-size="14"
+                  font-family="DM Sans"
+                >
+                  Floor plan loads with navigation data
+                </text>
+              </svg>
+            </div>
+            <div class="nav-steps" id="indoorSteps">
+              <div
+                style="color: var(--text2); font-size: 0.88rem; padding: 12px 0"
+              >
+                Click "Get My Location" on Outdoor tab first, then indoor steps
+                appear here.
+              </div>
+            </div>
+          </div>
+
+          <!-- Info tab -->
+          <div id="tab-info" class="tab-panel">
+            <div id="facultyInfoBlock"></div>
+          </div>
+
+          <!-- Action buttons -->
+          <div
+            style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap"
+          >
+            <button
+              class="btn-sm primary"
+              id="subscribeBtn"
+              onclick="toggleSubscribe()"
+              style="flex: 2; padding: 11px"
+            >
+              🔔 Notify When Available
+            </button>
+            <button
+              class="btn-sm"
+              onclick="shareLocation()"
+              style="flex: 1; padding: 11px"
+            >
+              🔗 Share
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notifications Panel -->
+    <div class="notif-panel" id="notifPanel">
+      <div class="notif-header">
+        Notifications
+        <button
+          class="btn-sm"
+          onclick="markAllRead()"
+          style="flex: none; font-size: 0.75rem; padding: 4px 10px"
+        >
+          Mark all read
+        </button>
+      </div>
+      <div id="notifList">
+        <div class="notif-empty">No notifications yet</div>
+      </div>
+    </div>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="./script.js"></script>
+
+    <!-- Load Socket.IO for real-time (optional, falls back gracefully) -->
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"
+      crossorigin="anonymous"
+    ></script>
+  </body>
+</html>
