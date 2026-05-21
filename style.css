@@ -710,6 +710,11 @@ body::before {
 .modal-overlay.open {
     opacity: 1;
     pointer-events: all;
+    visibility: visible;
+}
+
+.modal-overlay:not(.open) {
+    visibility: hidden;
 }
 
 .modal {
@@ -1038,6 +1043,24 @@ body::before {
     font-size: 0.85rem;
     color: var(--text2);
     margin-top: 4px;
+}
+
+.faculty-reg-hint,
+.faculty-profile-intro {
+  font-size: 0.85rem;
+  color: var(--text2);
+  line-height: 1.45;
+  margin: 0 0 14px;
+}
+
+.faculty-reg-hint {
+  margin-top: -4px;
+  margin-bottom: 12px;
+}
+
+.form-group .req {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .auth-switch a {

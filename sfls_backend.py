@@ -233,6 +233,16 @@ def haversine_km(lat1, lon1, lat2, lon2):
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def faculty_profile_for_user(user_id):
+    """Return whether the user has a faculty row and the record if present."""
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return False, None
+    f = Faculty.query.filter_by(user_id=uid).first()
+    return (f is not None, f)
+
+
 def faculty_to_dict(f: Faculty) -> dict:
     return {
         "id":            f.id,
@@ -275,7 +285,18 @@ def login():
 
     extra_claims = {"role": user.role, "name": user.full_name}
     token = create_access_token(identity=str(user.id), additional_claims=extra_claims)
-    return jsonify(token=token, role=user.role, name=user.full_name, id=user.id)
+    payload = {
+        "token": token,
+        "role": user.role,
+        "name": user.full_name,
+        "id": user.id,
+    }
+    if user.role == "faculty":
+        complete, faculty = faculty_profile_for_user(user.id)
+        payload["faculty_profile_complete"] = complete
+        if faculty:
+            payload["faculty_id"] = faculty.id
+    return jsonify(**payload)
 
 
 @app.route("/api/auth/register", methods=["POST"])
@@ -298,8 +319,87 @@ def register():
 def me():
     uid  = get_jwt_identity()
     user = User.query.get_or_404(uid)
-    return jsonify(id=user.id, email=user.email, name=user.full_name,
-                   role=user.role, avatar=user.avatar_url)
+    payload = {
+        "id": user.id,
+        "email": user.email,
+        "name": user.full_name,
+        "role": user.role,
+        "avatar": user.avatar_url,
+    }
+    if user.role == "faculty":
+        complete, faculty = faculty_profile_for_user(user.id)
+        payload["faculty_profile_complete"] = complete
+        if faculty:
+            payload["faculty_id"] = faculty.id
+    return jsonify(**payload)
+
+
+@app.route("/api/departments")
+def list_departments():
+    depts = Department.query.order_by(Department.name).all()
+    return jsonify(results=[
+        {"id": d.id, "name": d.name, "short_code": d.short_code}
+        for d in depts
+    ])
+
+
+@app.route("/api/auth/faculty-profile", methods=["GET", "POST"])
+@jwt_required()
+def faculty_profile():
+    uid  = int(get_jwt_identity())
+    user = User.query.get_or_404(uid)
+    if user.role != "faculty":
+        return jsonify(error="Only faculty accounts have a faculty profile"), 403
+
+    if request.method == "GET":
+        faculty = Faculty.query.filter_by(user_id=uid).first()
+        if not faculty:
+            return jsonify(complete=False)
+        return jsonify(complete=True, profile=faculty_to_dict(faculty))
+
+    # POST — create faculty profile
+    if Faculty.query.filter_by(user_id=uid).first():
+        return jsonify(error="Faculty profile already exists"), 409
+
+    data = request.get_json() or {}
+    department_id = data.get("department_id")
+    employee_id   = (data.get("employee_id") or "").strip()
+    designation   = (data.get("designation") or "").strip()
+    specialization = (data.get("specialization") or "").strip() or None
+    office_hours  = (data.get("office_hours") or "").strip() or None
+
+    if not department_id:
+        return jsonify(error="department_id is required"), 400
+    if not employee_id:
+        return jsonify(error="employee_id is required"), 400
+    if not designation:
+        return jsonify(error="designation is required"), 400
+
+    dept = Department.query.get(department_id)
+    if not dept:
+        return jsonify(error="Invalid department"), 400
+    if Faculty.query.filter_by(employee_id=employee_id).first():
+        return jsonify(error="Employee ID already in use"), 409
+
+    faculty = Faculty(
+        user_id=uid,
+        department_id=dept.id,
+        employee_id=employee_id,
+        designation=designation,
+        specialization=specialization,
+        office_hours=office_hours,
+        status="not_available",
+    )
+    db.session.add(faculty)
+    db.session.commit()
+    log_action("FACULTY_PROFILE_CREATED", "faculty", faculty.id)
+
+    return jsonify(
+        message="Faculty profile created",
+        complete=True,
+        faculty_id=faculty.id,
+        profile=faculty_to_dict(faculty),
+    ), 201
 
 
 # ─────────────────────────────────────────────

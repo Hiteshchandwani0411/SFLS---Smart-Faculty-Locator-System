@@ -6,6 +6,7 @@ let leafletMap = null;
 let state = {
   token: localStorage.getItem("sfls_token"),
   user: JSON.parse(localStorage.getItem("sfls_user") || "null"),
+  facultyId: null,
   faculties: [],
   currentFaculty: null,
   selectedStatus: null,
@@ -27,10 +28,32 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function restoreSession() {
   if (state.user) {
+    if (state.user.faculty_id) state.facultyId = state.user.faculty_id;
     showUserNav(state.user);
-    if (state.user.role === "faculty") showFacultyPage();
-    else if (state.user.role === "admin") showAdminPage();
+    if (state.user.role === "faculty") {
+      ensureFacultyProfile().then((ok) => {
+        if (ok) showFacultyPage();
+      });
+    } else if (state.user.role === "admin") showAdminPage();
   }
+}
+
+function persistUser() {
+  if (state.user) localStorage.setItem("sfls_user", JSON.stringify(state.user));
+}
+
+function applyAuthPayload(data) {
+  state.token = data.token;
+  state.user = {
+    id: data.id,
+    role: data.role,
+    name: data.name,
+    faculty_id: data.faculty_id ?? null,
+    faculty_profile_complete: data.faculty_profile_complete ?? false,
+  };
+  if (data.faculty_id) state.facultyId = data.faculty_id;
+  localStorage.setItem("sfls_token", data.token);
+  persistUser();
 }
 
 // ─── HTTP HELPER ──────────────────────────────────
@@ -681,21 +704,16 @@ async function doLogin() {
 
   try {
     const data = await api("/auth/login", "POST", { email, password });
+    applyAuthPayload(data);
 
-    // Save token and user info
-    state.token = data.token;
-    state.user = { id: data.id, role: data.role, name: data.name };
-    localStorage.setItem("sfls_token", data.token);
-    localStorage.setItem("sfls_user", JSON.stringify(state.user));
-
-    // Close modal and update UI
     closeModal("authOverlay");
     showUserNav(state.user);
     showToast(`Welcome back, ${data.name}! 👋`, "success");
 
-    // Route to correct dashboard based on role
-    if (data.role === "faculty") showFacultyPage();
-    else if (data.role === "admin") showAdminPage();
+    if (data.role === "faculty") {
+      const ready = await ensureFacultyProfile();
+      if (ready) showFacultyPage();
+    } else if (data.role === "admin") showAdminPage();
     else {
       showPage("page-student");
       loadFaculty();
@@ -710,10 +728,23 @@ async function doLogin() {
 }
 
 async function doRegister() {
-  const name = document.getElementById("regName").value;
-  const email = document.getElementById("regEmail").value;
+  const name = document.getElementById("regName").value.trim();
+  const email = document.getElementById("regEmail").value.trim();
   const pass = document.getElementById("regPassword").value;
   const role = document.getElementById("regRole").value;
+  const errEl = document.getElementById("authError");
+  const btn = document.querySelector("#registerForm .btn-full");
+
+  if (!name || !email || !pass) {
+    errEl.textContent = "Please fill in name, email, and password.";
+    errEl.style.display = "block";
+    return;
+  }
+
+  btn.textContent = "Creating account…";
+  btn.disabled = true;
+  errEl.style.display = "none";
+
   try {
     await api("/auth/register", "POST", {
       full_name: name,
@@ -721,18 +752,139 @@ async function doRegister() {
       password: pass,
       role,
     });
-    showToast("Account created! Please sign in.", "success");
-    showLogin();
+
+    if (role === "faculty") {
+      const data = await api("/auth/login", "POST", { email, password: pass });
+      applyAuthPayload(data);
+      closeModal("authOverlay");
+      showUserNav(state.user);
+      showToast("Account created! Complete your faculty profile.", "success");
+      await openFacultyProfileSetup();
+    } else {
+      showToast("Account created! Please sign in.", "success");
+      showLogin();
+    }
   } catch (e) {
-    const errEl = document.getElementById("authError");
     errEl.textContent = e.message;
     errEl.style.display = "block";
+  } finally {
+    btn.textContent = "Create Account →";
+    btn.disabled = false;
+  }
+}
+
+function toggleFacultyRegHint() {
+  const isFaculty = document.getElementById("regRole").value === "faculty";
+  document
+    .getElementById("facultyRegHint")
+    .classList.toggle("hidden", !isFaculty);
+}
+
+async function loadDepartments() {
+  const sel = document.getElementById("fpDept");
+  try {
+    const data = await api("/departments");
+    const depts = data.results || [];
+    if (!depts.length) {
+      sel.innerHTML =
+        '<option value="">No departments — ask admin to add some</option>';
+      return;
+    }
+    sel.innerHTML =
+      '<option value="">Select department…</option>' +
+      depts
+        .map(
+          (d) =>
+            `<option value="${d.id}">${d.name} (${d.short_code})</option>`,
+        )
+        .join("");
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load departments</option>';
+    showToast(e.message, "error");
+  }
+}
+
+async function openFacultyProfileSetup() {
+  document.getElementById("facultyProfileError").style.display = "none";
+  document.getElementById("fpEmployeeId").value = "";
+  document.getElementById("fpDesignation").value = "";
+  document.getElementById("fpSpecialization").value = "";
+  document.getElementById("fpOfficeHours").value = "";
+  await loadDepartments();
+  openModal("facultyProfileOverlay");
+}
+
+async function ensureFacultyProfile() {
+  if (!state.token || state.user?.role !== "faculty") return true;
+  if (state.user.faculty_profile_complete && state.facultyId) return true;
+
+  try {
+    const data = await api("/auth/faculty-profile");
+    if (data.complete && data.profile) {
+      state.facultyId = data.profile.id;
+      state.user.faculty_id = data.profile.id;
+      state.user.faculty_profile_complete = true;
+      persistUser();
+      return true;
+    }
+    await openFacultyProfileSetup();
+    return false;
+  } catch (e) {
+    showToast(e.message, "error");
+    return false;
+  }
+}
+
+async function submitFacultyProfile() {
+  const errEl = document.getElementById("facultyProfileError");
+  const btn = document.querySelector("#facultyProfileForm .btn-full");
+  const department_id = parseInt(document.getElementById("fpDept").value, 10);
+  const employee_id = document.getElementById("fpEmployeeId").value.trim();
+  const designation = document.getElementById("fpDesignation").value.trim();
+  const specialization = document
+    .getElementById("fpSpecialization")
+    .value.trim();
+  const office_hours = document.getElementById("fpOfficeHours").value.trim();
+
+  if (!department_id || !employee_id || !designation) {
+    errEl.textContent =
+      "Department, employee ID, and designation are required.";
+    errEl.style.display = "block";
+    return;
+  }
+
+  btn.textContent = "Saving…";
+  btn.disabled = true;
+  errEl.style.display = "none";
+
+  try {
+    const data = await api("/auth/faculty-profile", "POST", {
+      department_id,
+      employee_id,
+      designation,
+      specialization: specialization || undefined,
+      office_hours: office_hours || undefined,
+    });
+    state.facultyId = data.faculty_id;
+    state.user.faculty_id = data.faculty_id;
+    state.user.faculty_profile_complete = true;
+    persistUser();
+    closeModal("facultyProfileOverlay");
+    showToast("Faculty profile saved! You can update your status now.", "success");
+    showFacultyPage();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = "block";
+  } finally {
+    btn.textContent = "Save Profile & Continue →";
+    btn.disabled = false;
   }
 }
 
 function logout() {
   state.token = null;
   state.user = null;
+  state.facultyId = null;
   localStorage.removeItem("sfls_token");
   localStorage.removeItem("sfls_user");
   document.getElementById("authButtons").classList.remove("hidden");
@@ -752,18 +904,35 @@ function showUserNav(user) {
 // ─── FACULTY DASHBOARD ────────────────────────────
 let selectedStatusVal = null;
 
-function showFacultyPage() {
+async function showFacultyPage() {
   showPage("page-faculty");
-  // Load current faculty data
-  const me = MOCK_FACULTY.find((f) => f.employee_id) || MOCK_FACULTY[0];
+
+  const ready = await ensureFacultyProfile();
+  if (!ready) return;
+
   document.getElementById("fpName").textContent = state.user?.name || "Faculty";
-  document.getElementById("fpDesig").textContent =
-    "Update your availability for students";
-  document.getElementById("fpCurrentStatus").textContent =
-    STATUS_LABELS[me.status] || "Unknown";
-  // Pre-select status
-  selectStatusByValue(me.status);
-  document.getElementById("statusMsg").value = me.status_message || "";
+
+  try {
+    const data = await api("/auth/faculty-profile");
+    if (!data.complete || !data.profile) {
+      await openFacultyProfileSetup();
+      return;
+    }
+    const me = data.profile;
+    state.facultyId = me.id;
+    state.user.faculty_id = me.id;
+    persistUser();
+
+    document.getElementById("fpDesig").textContent =
+      [me.designation, me.department].filter(Boolean).join(" · ") ||
+      "Update your availability for students";
+    document.getElementById("fpCurrentStatus").textContent =
+      STATUS_LABELS[me.status] || "Unknown";
+    selectStatusByValue(me.status);
+    document.getElementById("statusMsg").value = me.status_message || "";
+  } catch (e) {
+    showToast(e.message, "error");
+  }
 }
 
 function selectStatus(el) {
@@ -784,24 +953,35 @@ async function saveStatus() {
     showToast("Please select a status", "error");
     return;
   }
-  const msg = document.getElementById("statusMsg").value;
-  // In real app: use faculty id from JWT
-  const fid = 1;
-  await api(`/faculty/${fid}/status`, "PATCH", {
-    status: selectedStatusVal,
-    message: msg,
-  });
-  document.getElementById("fpCurrentStatus").textContent =
-    STATUS_LABELS[selectedStatusVal];
-  // Update mock data
-  const f = MOCK_FACULTY.find((x) => x.id === fid);
-  if (f) {
-    f.status = selectedStatusVal;
-    f.status_message = msg;
+
+  if (!state.facultyId) {
+    const ready = await ensureFacultyProfile();
+    if (!ready || !state.facultyId) {
+      showToast("Complete your faculty profile first", "error");
+      return;
+    }
   }
-  showToast("Status updated successfully! 🎉", "success");
-  // Re-render grid if student page was open
-  renderFacultyGrid(state.faculties);
+
+  const msg = document.getElementById("statusMsg").value;
+  const fid = state.facultyId;
+
+  try {
+    await api(`/faculty/${fid}/status`, "PATCH", {
+      status: selectedStatusVal,
+      message: msg,
+    });
+    document.getElementById("fpCurrentStatus").textContent =
+      STATUS_LABELS[selectedStatusVal];
+    const f = state.faculties.find((x) => x.id === fid);
+    if (f) {
+      f.status = selectedStatusVal;
+      f.status_message = msg;
+    }
+    showToast("Status updated successfully! 🎉", "success");
+    renderFacultyGrid(state.faculties);
+  } catch (e) {
+    showToast(e.message, "error");
+  }
 }
 
 async function doCheckin() {
@@ -1193,6 +1373,7 @@ function showRegister() {
   document.getElementById("registerForm").classList.remove("hidden");
   document.getElementById("authTitle").textContent = "Create Account";
   document.getElementById("authError").style.display = "none";
+  toggleFacultyRegHint();
 }
 
 function showPage(id) {
