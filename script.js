@@ -24,7 +24,82 @@ document.addEventListener("DOMContentLoaded", () => {
   loadFaculty();
   connectWebSocket();
   requestNotifPermission();
+  fetchBuildings();
+
+  const bldgDropdown = document.getElementById("floorBldg");
+  const floorDropdown = document.getElementById("roomFloor");
+
+  // Jab building select ho, tab uske floors load karo
+  bldgDropdown.addEventListener("change", (e) => {
+    const selectedBuildingId = e.target.value; // Yahan ab Building ID milegi
+
+    if (selectedBuildingId === "") {
+      floorDropdown.innerHTML = '<option value="">Select Floor</option>';
+      floorDropdown.disabled = true;
+    } else {
+      fetchFloors(selectedBuildingId);
+    }
+  });
 });
+
+function fetchBuildings() {
+  const bldgDropdown = document.getElementById("floorBldg");
+
+  fetch("/api/buildings")
+    .then((response) => {
+      if (!response.ok) throw new Error("Failed to fetch buildings");
+      return response.json();
+    })
+    .then((buildings) => {
+      bldgDropdown.innerHTML = '<option value="">Select Building</option>';
+
+      buildings.forEach((bldg) => {
+        const option = document.createElement("option");
+        option.value = bldg.id; // Value me Database ID jayegi (e.g., 1)
+        option.textContent = bldg.name; // Display me Text dikhega (e.g., "Block-A")
+        bldgDropdown.appendChild(option);
+      });
+    })
+    .catch((error) => {
+      console.error("Error:", error);
+      bldgDropdown.innerHTML =
+        '<option value="">Failed to load buildings</option>';
+    });
+}
+
+function fetchFloors(buildingId) {
+  const floorDropdown = document.getElementById("roomFloor");
+
+  floorDropdown.innerHTML = '<option value="">Loading floors...</option>';
+  floorDropdown.disabled = false;
+
+  // URL me query param 'building_id' ke saath pass kar rahe hain
+  fetch(`/api/floors?building_id=${buildingId}`)
+    .then((response) => {
+      if (!response.ok) throw new Error("Failed to fetch floors");
+      return response.json();
+    })
+    .then((floors) => {
+      floorDropdown.innerHTML = '<option value="">Select Floor</option>';
+
+      if (floors.length === 0) {
+        floorDropdown.innerHTML = '<option value="">No floors found</option>';
+        return;
+      }
+
+      floors.forEach((floor) => {
+        const option = document.createElement("option");
+        option.value = floor.id; // Floor ki ID
+        option.textContent = floor.name; // Floor ka display name
+        floorDropdown.appendChild(option);
+      });
+    })
+    .catch((error) => {
+      console.error("Error:", error);
+      floorDropdown.innerHTML =
+        '<option value="">Failed to load floors</option>';
+    });
+}
 
 function restoreSession() {
   if (state.user) {
@@ -71,154 +146,6 @@ async function api(path, method = "GET", body = null) {
   return data;
 }
 
-// ─── MOCK DATA (for demo without backend) ─────────
-function getMockData(path, method, body) {
-  if (path === "/faculty" || path.startsWith("/faculty?"))
-    return mockFacultyList();
-  if (
-    path.startsWith("/faculty/") &&
-    path.endsWith("/status") &&
-    method === "PATCH"
-  ) {
-    return { success: true, new_status: body?.status };
-  }
-  if (path.startsWith("/faculty/"))
-    return mockFacultyDetail(parseInt(path.split("/")[2]));
-  if (path === "/auth/login") return mockLogin(body);
-  if (path === "/navigate") return mockNavigate();
-  if (path === "/notifications") return { results: [], total: 0 };
-  if (path === "/admin/buildings" && method === "GET") return mockBuildings();
-  if (path === "/checkin" && method === "POST")
-    return { on_campus: true, dist_km: 0.12 };
-  return {};
-}
-
-const MOCK_FACULTY = [
-  {
-    id: 1,
-    name: "Dr. Priya Sharma",
-    designation: "Professor",
-    dept_code: "CSE",
-    department: "Computer Science",
-    status: "available",
-    status_message: "Open office hours today",
-    employee_id: "CSE001",
-    office_hours: "Mon-Fri 10-12",
-    is_on_campus: true,
-    room: { number: "205", name: "Staff Room" },
-    specialization: "Machine Learning",
-  },
-  {
-    id: 2,
-    name: "Prof. Ramesh Kumar",
-    designation: "Asst. Professor",
-    dept_code: "CSE",
-    department: "Computer Science",
-    status: "in_class",
-    status_message: "Lecture ends at 3 PM",
-    employee_id: "CSE002",
-    office_hours: "Mon-Wed 2-4",
-    is_on_campus: true,
-    room: { number: "301", name: "HOD Cabin" },
-    specialization: "Networks",
-  },
-  {
-    id: 3,
-    name: "Dr. Anita Verma",
-    designation: "Associate Prof.",
-    dept_code: "ECE",
-    department: "Electronics",
-    status: "busy",
-    status_message: "In research meeting",
-    employee_id: "ECE001",
-    office_hours: "Tue-Thu 11-1",
-    is_on_campus: true,
-    room: { number: "102", name: "ECE Office" },
-    specialization: "VLSI Design",
-  },
-  {
-    id: 4,
-    name: "Prof. Suresh Yadav",
-    designation: "Professor",
-    dept_code: "MECH",
-    department: "Mechanical Engg",
-    status: "not_available",
-    status_message: "Out of campus today",
-    employee_id: "MCH001",
-    office_hours: "Mon-Fri 9-11",
-    is_on_campus: false,
-    room: { number: "401", name: "MECH Lab" },
-    specialization: "Thermodynamics",
-  },
-  {
-    id: 5,
-    name: "Dr. Kavita Singh",
-    designation: "Asst. Professor",
-    dept_code: "MATH",
-    department: "Mathematics",
-    status: "available",
-    status_message: "Available for doubt sessions",
-    employee_id: "MTH001",
-    office_hours: "Daily 10-12",
-    is_on_campus: true,
-    room: { number: "115", name: "Math Dept" },
-    specialization: "Algebra",
-  },
-  {
-    id: 6,
-    name: "Prof. Deepak Mishra",
-    designation: "Senior Lecturer",
-    dept_code: "CSE",
-    department: "Computer Science",
-    status: "available",
-    status_message: "",
-    employee_id: "CSE003",
-    office_hours: "Mon-Fri 2-4",
-    is_on_campus: true,
-    room: { number: "206", name: "Staff Room" },
-    specialization: "Data Structures",
-  },
-];
-
-function mockFacultyList() {
-  return { total: MOCK_FACULTY.length, page: 1, results: MOCK_FACULTY };
-}
-function mockFacultyDetail(id) {
-  return MOCK_FACULTY.find((f) => f.id === id) || MOCK_FACULTY[0];
-}
-function mockLogin(body) {
-  const map = {
-    "admin@campus.edu": {
-      id: 1,
-      role: "admin",
-      full_name: "System Admin",
-    },
-    "dr.sharma@campus.edu": {
-      id: 2,
-      role: "faculty",
-      full_name: "Dr. Priya Sharma",
-    },
-    "student1@campus.edu": {
-      id: 3,
-      role: "student",
-      full_name: "Arjun Mehta",
-    },
-  };
-  const u = map[body?.email?.toLowerCase()];
-  if (!u) throw new Error("Invalid credentials");
-  return {
-    token: "demo_token_" + u.role,
-    role: u.role,
-    name: u.full_name,
-    id: u.id,
-  };
-}
-function mockBuildings() {
-  return [
-    { id: 1, name: "CSE Block", short_code: "CSE-BLK" },
-    { id: 2, name: "Science Block", short_code: "SCI-BLK" },
-  ];
-}
 function mockNavigate() {
   return {
     outdoor: {
@@ -794,8 +721,7 @@ async function loadDepartments() {
       '<option value="">Select department…</option>' +
       depts
         .map(
-          (d) =>
-            `<option value="${d.id}">${d.name} (${d.short_code})</option>`,
+          (d) => `<option value="${d.id}">${d.name} (${d.short_code})</option>`,
         )
         .join("");
   } catch (e) {
@@ -870,7 +796,10 @@ async function submitFacultyProfile() {
     state.user.faculty_profile_complete = true;
     persistUser();
     closeModal("facultyProfileOverlay");
-    showToast("Faculty profile saved! You can update your status now.", "success");
+    showToast(
+      "Faculty profile saved! You can update your status now.",
+      "success",
+    );
     showFacultyPage();
   } catch (e) {
     errEl.textContent = e.message;
